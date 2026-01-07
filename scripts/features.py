@@ -1,8 +1,7 @@
 # features.py
+from __future__ import annotations
 import torch
 import torch.nn.functional as F
-
-from __future__ import annotations
 from typing import Any, Dict, List
 import numpy as np
 
