@@ -2,29 +2,41 @@
 import torch
 import torch.nn.functional as F
 
-def compute_basic_logit_features(critic, texts, max_length=1024):
-    """
-    critic: CriticModel instance from models.py
-    texts: list[str]
-    """
-    batch = critic.tokenize(texts, max_length=max_length)
-    logits = critic.get_logits(batch)           # [B, T, V]
-    logprobs = F.log_softmax(logits, dim=-1)    # [B, T, V]
+from __future__ import annotations
+from typing import Any, Dict, List
+import numpy as np
 
-    # gather logprobs of the actual tokens
-    input_ids = batch["input_ids"]
-    token_logprobs = logprobs.gather(
-        -1, input_ids.unsqueeze(-1)
-    ).squeeze(-1)                               # [B, T]
+def aggregate_doc_from_windows(
+    window_rows: List[Dict[str, Any]],
+    feature_key: str,
+    doc_id_key: str = "text_id",
+) -> List[Dict[str, Any]]:
+    by_doc: Dict[str, List[Dict[str, Any]]] = {}
+    for r in window_rows:
+        meta = r.get("meta", {}) or {}
+        doc_id = meta.get(doc_id_key) or meta.get("doc_id") or meta.get("text_id") or "unknown"
+        by_doc.setdefault(str(doc_id), []).append(r)
 
-    # mask padding
-    attn = batch["attention_mask"]
-    lengths = attn.sum(dim=1)
+    doc_rows: List[Dict[str, Any]] = []
+    for doc_id, rows in by_doc.items():
+        feats_list = [rr.get(feature_key, {}) for rr in rows if isinstance(rr.get(feature_key, {}), dict)]
+        if not feats_list:
+            continue
 
-    # simple example: mean logprob per sequence
-    seq_logprob_mean = (token_logprobs * attn).sum(dim=1) / lengths
+        keys = sorted({k for d in feats_list for k in d.keys()})
+        agg: Dict[str, Any] = {}
+        for k in keys:
+            vals = np.array([d[k] for d in feats_list if k in d and isinstance(d[k], (int, float))], dtype=float)
+            if vals.size == 0:
+                continue
+            agg[f"mean_{k}"] = float(vals.mean())
+            agg[f"std_{k}"] = float(vals.std(ddof=0)) if vals.size > 1 else 0.0
 
-    return {
-        "mean_logprob": seq_logprob_mean.cpu().numpy(),
-        # you can add entropy, margins, etc., here
-    }
+        doc_rows.append(
+            {
+                "label": rows[0].get("label", None),
+                "meta": {"level": "doc", doc_id_key: doc_id},
+                feature_key: agg,
+            }
+        )
+    return doc_rows
