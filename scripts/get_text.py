@@ -32,7 +32,7 @@ def write_jsonl(output_path: Path, rows: list[dict]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Convert .pdf/.docx/.txt into normalized .txt")
-    parser.add_argument("input_path", type=str, help="Path to input file (.pdf, .docx, or .txt)")
+    parser.add_argument("--input_path", type=str, help="Path to input file (.pdf, .docx, or .txt)")
     parser.add_argument("--output_path",type=str,default=None, help="Where to save the normalized text")
     parser.add_argument("--max_estimated_tokens",type=int,default=None, help="Split into windows of ~this many tokens and join with a separator.")
     parser.add_argument("--overlap_estimated_tokens",type=int,default=0, help="Optional overlap between windows (approx tokens). Only used if max_estimated_tokens is set.")
