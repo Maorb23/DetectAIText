@@ -1,0 +1,6 @@
+python-docx>=0.8
+pypdf>=4.0
+torch>=2.1
+transformers>=4.39
+numpy>=1.24
+scikit-learn>=1.4
