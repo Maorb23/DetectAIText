@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from scripts.tools.binoculars_metrics import perplexity_mean, cross_entropy_p_q_mean
+from scripts.tools.binocular_metrics import perplexity_mean, cross_entropy_p_q_mean
 from scripts.utils.utils_tokenizer import assert_tokenizer_consistency  # or keep local
 
 
