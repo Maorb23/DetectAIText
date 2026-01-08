@@ -11,8 +11,8 @@ from pypdf import PdfReader
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.data.convert import load_text_format
-from scripts.data.preprocess import normalize_text, split_text_into_windows, prepare_examples
+from scripts.data_files.convert import load_text_format
+from scripts.data_files.preprocess import normalize_text, split_text_into_windows, prepare_examples
 import logging
 import json
 logger = logging.getLogger(__name__) # set up a logger
