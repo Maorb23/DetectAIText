@@ -90,32 +90,73 @@ class BinocularsTool:
             torch.cuda.synchronize()
         return obs, perf
 
-    def featurize_texts(self, texts: List[str]) -> List[Dict[str, Any]]:
-        enc = self._tokenize(texts)
-        obs_logits, perf_logits = self._get_logits(enc)
+    def featurize_texts(self,texts: List[str],batch_size: int = 8,
+                        show_progress: bool = True,
+                        progress_desc: str = "Binoculars",) -> List[Dict[str, Any]]:
+        """
+        Featurize many texts efficiently (batched) with optional tqdm progress.
 
-        # compute in numpy for stability
-        ppl_nll = perplexity_mean(enc.to(self.device_2), perf_logits)  # performer side
-        xent = cross_entropy_p_q_mean(
-            p_logits=obs_logits.to(self.device_1),
-            q_logits=perf_logits.to(self.device_1),
-            encoding=enc.to(self.device_1),
-            pad_token_id=self.tokenizer.pad_token_id,
-        )
+        Returns: List of dicts like:
+        [{"binoculars_features": {...}}, ...] aligned with `texts`.
+        """
+        if not texts:
+            return []
 
-        score = (ppl_nll / (xent + 1e-8)).astype(np.float32)
+        if batch_size <= 0:
+            raise ValueError("batch_size must be >= 1")
 
-        out: List[Dict[str, Any]] = []
-        for i in range(len(texts)):
-            out.append({
-                "binoculars_features": {
-                    "ppl_nll_mean": float(ppl_nll[i]),
-                    "xent_mean": float(xent[i]),
-                    "score_raw": float(score[i]),
-                    "threshold": float(self.threshold),
-                    "mode": self.cfg.mode,
-                    "observer_model_id": self.cfg.observer_model_id,
-                    "performer_model_id": self.cfg.performer_model_id,
-                }
-            })
-        return out
+        results: List[Dict[str, Any]] = []
+
+        iterator = range(0, len(texts), batch_size)
+        if show_progress:
+            iterator = tqdm(iterator, desc=progress_desc, unit="batch")
+
+        for i in iterator:
+            batch = texts[i : i + batch_size]
+            enc = self._tokenize(batch)
+            obs_logits, perf_logits = self._get_logits(enc)
+
+            # performer perplexity (mean NLL)
+            ppl_nll = perplexity(enc.to(self.performer_model.device), perf_logits)
+
+            # cross-entropy H(p_obs, q_perf) (mean)
+            x_ppl = entropy(
+                obs_logits.to(self.observer_model.device),
+                perf_logits.to(self.observer_model.device),
+                enc.to(self.observer_model.device),
+                self.tokenizer.pad_token_id,
+            )
+
+            # ratio score
+            binoculars_scores = ppl_nll / (x_ppl + 1e-8)
+
+            # Convert to python floats + build output in your repo schema
+            if hasattr(binoculars_scores, "tolist"):
+                binoculars_scores = binoculars_scores.tolist()
+            if hasattr(ppl_nll, "tolist"):
+                ppl_nll_list = ppl_nll.tolist()
+            else:
+                ppl_nll_list = list(ppl_nll)
+            if hasattr(x_ppl, "tolist"):
+                x_ppl_list = x_ppl.tolist()
+            else:
+                x_ppl_list = list(x_ppl)
+
+            for j in range(len(batch)):
+                results.append(
+                    {
+                        "binoculars_features": {
+                            "score_raw": float(binoculars_scores[j]),
+                            "ppl_nll_mean": float(ppl_nll_list[j]),
+                            "xent_mean": float(x_ppl_list[j]),
+                            "threshold": float(self.threshold),
+                            "mode": self.mode,
+                            "observer_model_id": self.observer_name_or_path,
+                            "performer_model_id": self.performer_name_or_path,
+                            "max_tokens": int(self.max_token_observed),
+                        }
+                    }
+                )
+
+        return results
+
