@@ -23,7 +23,7 @@ class BinocularsConfig:
     max_tokens: int = 512
     use_bfloat16: bool = True
     mode: str = "low-fpr"  # "low-fpr" | "accuracy"
-    device_1: Optional[str] = None
+    device_1: Optional[str] = None  
     device_2: Optional[str] = None
     hf_token_env: str = "HF_TOKEN"
     trust_remote_code: bool = True
@@ -150,10 +150,10 @@ class BinocularsTool:
                             "ppl_nll_mean": float(ppl_nll_list[j]),
                             "xent_mean": float(x_ppl_list[j]),
                             "threshold": float(self.threshold),
-                            "mode": self.mode,
-                            "observer_model_id": self.observer_name_or_path,
-                            "performer_model_id": self.performer_name_or_path,
-                            "max_tokens": int(self.max_token_observed),
+                            "mode": self.cfg.mode,
+                            "observer_model_id": self.cfg.observer_name_or_path,
+                            "performer_model_id": self.cfg.performer_name_or_path,
+                            "max_tokens": int(self.cfg.max_tokens),
                         }
                     }
                 )
