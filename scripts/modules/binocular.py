@@ -4,13 +4,13 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
-
+import numpy as np
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from scripts.tools.binocular_metrics import perplexity_mean, cross_entropy_p_q_mean
 from scripts.utils.utils_tokenizer import assert_tokenizer_consistency  # or keep local
-
+from tqdm import tqdm
 
 BINOCULARS_ACCURACY_THRESHOLD = 0.9015310749276843
 BINOCULARS_FPR_THRESHOLD = 0.8536432310785527
@@ -117,10 +117,10 @@ class BinocularsTool:
             obs_logits, perf_logits = self._get_logits(enc)
 
             # performer perplexity (mean NLL)
-            ppl_nll = perplexity(enc.to(self.performer_model.device), perf_logits)
+            ppl_nll = perplexity_mean(enc.to(self.performer_model.device), perf_logits)
 
             # cross-entropy H(p_obs, q_perf) (mean)
-            x_ppl = entropy(
+            x_ppl = cross_entropy_p_q_mean(
                 obs_logits.to(self.observer_model.device),
                 perf_logits.to(self.observer_model.device),
                 enc.to(self.observer_model.device),
