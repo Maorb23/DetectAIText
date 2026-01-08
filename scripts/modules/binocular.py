@@ -151,7 +151,7 @@ class BinocularsTool:
                             "xent_mean": float(x_ppl_list[j]),
                             "threshold": float(self.threshold),
                             "mode": self.cfg.mode,
-                            "observer_model_id": self.cfg.observer_model_id
+                            "observer_model_id": self.cfg.observer_model_id,
                             "performer_model_id": self.cfg.performer_model_id,
                             "max_tokens": int(self.cfg.max_tokens),
                         }
