@@ -55,8 +55,9 @@ def cross_entropy_p_q_mean(
     ce = -(p * log_q).sum(dim=-1)  # (B, T-1)
 
     # mask: non-pad of the *label* tokens (input_ids shifted)
-    shifted_ids = encoding.input_ids[..., 1:].contiguous()
+    shifted_ids = encoding.input_ids[..., 1:].contiguous() # contiguous asserts that memory layout is ok
     mask = (shifted_ids != pad_token_id)
 
-    ce = (ce * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1)
+    ce = (ce * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1) # we clamp to avoid div by zero
     return ce.detach().to("cpu").float().numpy()
+

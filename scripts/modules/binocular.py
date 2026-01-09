@@ -82,13 +82,33 @@ class BinocularsTool:
         # keep input_ids on CPU; we move per-model call to their device
         return enc
 
-    @torch.inference_mode()
+ 
+    @torch.inference_mode() # like no_grad but also disables some other training-only ops
     def _get_logits(self, enc):
-        obs = self.observer_model(**{k: v.to(self.device_1) for k, v in enc.items()}).logits
-        perf = self.performer_model(**{k: v.to(self.device_2) for k, v in enc.items()}).logits
+        # Send the shared encoding to each model’s device
+
+        #enc_for_obs = {k: v.to(self.device_1) for k, v in enc.items()}
+        #enc_for_perf = {k: v.to(self.device_2) for k, v in enc.items()}
+        # rewrite it in a more explicit way:
+        enc_for_obs = {}
+        enc_for_perf = {}
+        for k, v in enc.items():
+            if self.device_1 == self.device_2:
+                print("Same device for both models:", self.device_1)
+                enc_for_obs[k] = v.to(self.device_1)
+                enc_for_perf[k] = v.to(self.device_1)
+            else:
+                enc_for_obs[k] = v.to(self.device_1)
+                enc_for_perf[k] = v.to(self.device_2)
+
+        obs_logits = self.observer_model(**enc_for_obs).logits
+        perf_logits = self.performer_model(**enc_for_perf).logits
+
+        # Keep CUDA streams in sync when using GPUs
         if self.device_1.startswith("cuda") or self.device_2.startswith("cuda"):
-            torch.cuda.synchronize()
-        return obs, perf
+            torch.cuda.synchronize() # ensure all ops are done before moving data around
+
+        return obs_logits, perf_logits
 
     def featurize_texts(self,texts: List[str],batch_size: int = 8,
                         show_progress: bool = True,
@@ -116,10 +136,15 @@ class BinocularsTool:
             enc = self._tokenize(batch)
             obs_logits, perf_logits = self._get_logits(enc)
 
-            # performer perplexity (mean NLL)
-            ppl_nll = perplexity_mean(enc.to(self.performer_model.device), perf_logits)
+            # NOTE: keep enc on CPU; metrics will use enc tensors on the right device as needed.
 
-            # cross-entropy H(p_obs, q_perf) (mean)
+            # Performer log-PPL (mean NLL on true next tokens)
+            perf_ppl_nll = perplexity_mean(enc.to(self.performer_model.device), perf_logits)
+
+            # Observer log-PPL (mean NLL on true next tokens)  [paper numerator]
+            obs_ppl_nll = perplexity_mean(enc.to(self.observer_model.device), obs_logits)
+
+            # Paper X-PPL in log-space: H(p_obs, q_perf)
             x_ppl = cross_entropy_p_q_mean(
                 obs_logits.to(self.observer_model.device),
                 perf_logits.to(self.observer_model.device),
@@ -127,36 +152,40 @@ class BinocularsTool:
                 self.tokenizer.pad_token_id,
             )
 
-            # ratio score
-            binoculars_scores = ppl_nll / (x_ppl + 1e-8)
+            # Ratios (paper + repo-style)
+            eps = 1e-8
+            score_obs = obs_ppl_nll / (x_ppl + eps)    # paper-faithful numerator
+            score_perf = perf_ppl_nll / (x_ppl + eps)  # repo-style numerator
 
-            # Convert to python floats + build output in your repo schema
-            if hasattr(binoculars_scores, "tolist"):
-                binoculars_scores = binoculars_scores.tolist()
-            if hasattr(ppl_nll, "tolist"):
-                ppl_nll_list = ppl_nll.tolist()
-            else:
-                ppl_nll_list = list(ppl_nll)
-            if hasattr(x_ppl, "tolist"):
-                x_ppl_list = x_ppl.tolist()
-            else:
-                x_ppl_list = list(x_ppl)
+            # Convert to Python lists
+            obs_ppl_nll_list = obs_ppl_nll.tolist() if hasattr(obs_ppl_nll, "tolist") else list(obs_ppl_nll)
+            perf_ppl_nll_list = perf_ppl_nll.tolist() if hasattr(perf_ppl_nll, "tolist") else list(perf_ppl_nll)
+            x_ppl_list = x_ppl.tolist() if hasattr(x_ppl, "tolist") else list(x_ppl)
+            score_obs_list = score_obs.tolist() if hasattr(score_obs, "tolist") else list(score_obs)
+            score_perf_list = score_perf.tolist() if hasattr(score_perf, "tolist") else list(score_perf)
 
             for j in range(len(batch)):
                 results.append(
                     {
                         "binoculars_features": {
-                            "score_raw": float(binoculars_scores[j]),
-                            "ppl_nll_mean": float(ppl_nll_list[j]),
+                            # Two variants (keep both; calibrate later)
+                            "score_obs_raw": float(score_obs_list[j]),
+                            "score_perf_raw": float(score_perf_list[j]),
+
+                            # Components
+                            "obs_ppl_nll_mean": float(obs_ppl_nll_list[j]),
+                            "perf_ppl_nll_mean": float(perf_ppl_nll_list[j]),
                             "xent_mean": float(x_ppl_list[j]),
+
+                            # Metadata
                             "threshold": float(self.threshold),
                             "mode": self.cfg.mode,
                             "observer_model_id": self.cfg.observer_model_id,
                             "performer_model_id": self.cfg.performer_model_id,
                             "max_tokens": int(self.cfg.max_tokens),
+                            "batch_size": int(batch_size),
                         }
                     }
                 )
 
         return results
-
