@@ -14,6 +14,7 @@ from scripts.features import aggregate_doc_from_windows
 from scripts.modules.heuristics import compute_heuristics
 from scripts.modules.logits import LogitsFeatureExtractor
 from scripts.modules.binocular import BinocularsTool, BinocularsConfig
+from scripts.modules.fast_detect_gpt import FastDetectGPTTool, FastDetectGPTConfig 
 
 
 def read_jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -57,13 +58,27 @@ def main() -> None:
     parse.add_argument("--bino_device_1", type=str, default=None, help="Observer device (e.g., cuda:0). Default: auto")
     parse.add_argument("--bino_device_2", type=str, default=None, help="Performer device (e.g., cuda:1). Default: auto")
     
+    # FastDetectGPT (Step 2)
+    parse.add_argument("--with_fastdetectgpt", action="store_true", help="Compute FastDetectGPT features (Step 2)")
+    parse.add_argument("--fd_sampling_model_id", type=str, default="Qwen/Qwen2.5-1.5B")
+    parse.add_argument("--fd_scoring_model_id", type=str, default="Qwen/Qwen2.5-1.5B-Instruct")
+    parse.add_argument("--fd_max_tokens", type=int, default=512)
+    parse.add_argument("--fd_batch_size", type=int, default=4)
+    parse.add_argument("--fd_use_bfloat16", action="store_true")
+
     # Step 3: Logits
     parse.add_argument("--with_logits", action="store_true", help="Also compute logits features (Step 3)")
     parse.add_argument("--logits_model_id", type=str, default="Qwen/Qwen3-0.6B", help="HF model id for logits")
     parse.add_argument("--logits_max_tokens", type=int, default=512, help="Max tokens per window for logits scoring")
     parse.add_argument("--device", type=str, default=None, help="Force device (cpu/cuda). Default: auto")
-
     
+    
+    # optional normal-mapping params (if you have them; otherwise leave unset)
+    parse.add_argument("--fd_mu0", type=float, default=None)
+    parse.add_argument("--fd_sigma0", type=float, default=None)
+    parse.add_argument("--fd_mu1", type=float, default=None)
+    parse.add_argument("--fd_sigma1", type=float, default=None)
+
 
     args = parse.parse_args()
 
@@ -133,6 +148,51 @@ def main() -> None:
             doc_obj = bino_doc_rows[0] if len(bino_doc_rows) == 1 else {"docs": bino_doc_rows}
             write_json(bino_doc_out, doc_obj)
             print(f"Saved doc binoculars: {bino_doc_out}")
+
+
+
+    if args.with_fastdetectgpt:
+        texts = [ex["text"] for ex in examples]
+
+        cfg = FastDetectGPTConfig(
+            sampling_model_id=args.fd_sampling_model_id,
+            scoring_model_id=args.fd_scoring_model_id,
+            device=args.device,
+            max_tokens=args.fd_max_tokens,
+            use_bfloat16=bool(args.fd_use_bfloat16),
+            mu0=args.fd_mu0,
+            sigma0=args.fd_sigma0,
+            mu1=args.fd_mu1,
+            sigma1=args.fd_sigma1,
+        )
+        tool = FastDetectGPTTool(cfg)
+        fd_feats = tool.featurize_texts(
+            texts,
+            batch_size=args.fd_batch_size,
+            show_progress=True,
+            progress_desc="FastDetectGPT",
+        )
+
+        fd_window_rows: List[Dict[str, Any]] = []
+        for ex, feat in zip(examples, fd_feats):
+            fd_window_rows.append(
+                {
+                    "label": ex.get("label", None),
+                    "meta": ex.get("meta", {}),
+                    "fastdetectgpt_features": feat["fastdetectgpt_features"],
+                }
+            )
+
+        fd_windows_out = out_dir / f"{base}_fastdetectgpt_windows.jsonl"
+        write_jsonl(fd_windows_out, fd_window_rows)
+        print(f"Saved window fastdetectgpt: {fd_windows_out}")
+
+    if args.aggregate_doc:
+        fd_doc_rows = aggregate_doc_from_windows(fd_window_rows, feature_key="fastdetectgpt_features")
+        fd_doc_out = out_dir / f"{base}_fastdetectgpt_doc.json"
+        doc_obj = fd_doc_rows[0] if len(fd_doc_rows) == 1 else {"docs": fd_doc_rows}
+        write_json(fd_doc_out, doc_obj)
+        print(f"Saved doc fastdetectgpt: {fd_doc_out}")
 
     # -------------------------
     # Step 3: Logits features
