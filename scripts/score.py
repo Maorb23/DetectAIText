@@ -221,12 +221,12 @@ def main() -> None:
         write_jsonl(fd_windows_out, fd_window_rows)
         print(f"Saved window fastdetectgpt: {fd_windows_out}")
 
-    if args.aggregate_doc:
-        fd_doc_rows = aggregate_doc_from_windows(fd_window_rows, feature_key="fastdetectgpt_features")
-        fd_doc_out = out_dir / f"{base}_fastdetectgpt_doc.json"
-        doc_obj = fd_doc_rows[0] if len(fd_doc_rows) == 1 else {"docs": fd_doc_rows}
-        write_json(fd_doc_out, doc_obj)
-        print(f"Saved doc fastdetectgpt: {fd_doc_out}")
+        if args.aggregate_doc:
+            fd_doc_rows = aggregate_doc_from_windows(fd_window_rows, feature_key="fastdetectgpt_features")
+            fd_doc_out = out_dir / f"{base}_fastdetectgpt_doc.json"
+            doc_obj = fd_doc_rows[0] if len(fd_doc_rows) == 1 else {"docs": fd_doc_rows}
+            write_json(fd_doc_out, doc_obj)
+            print(f"Saved doc fastdetectgpt: {fd_doc_out}")
 
     
     # -------------------------
