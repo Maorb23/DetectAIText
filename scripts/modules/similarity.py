@@ -111,7 +111,14 @@ def compute_coherence_features(
 
     # adjacency similarities
     if n >= 2:
-        adj = np.array([float(np.dot(embs_n[i], embs_n[i + 1])) for i in range(n - 1)])
+        prev_embs = embs_n[:-1]         # embeddings for sentences 0..(n-2)
+        next_embs = embs_n[1:]          # embeddings for sentences 1..(n-1)
+
+        # element-wise dot products -> an array of length (n-1)
+        adjacency_dots = np.sum(prev_embs * next_embs, axis=1)
+
+        # ensure float dtype to match previous behavior
+        adj = adjacency_dots.astype(float)
         mean_adj = float(np.mean(adj))
         std_adj = float(np.std(adj, ddof=0))
     else:
@@ -136,13 +143,15 @@ def compute_coherence_features(
     centroid_cos = float(np.dot(embs_n, centroid).mean())
 
     # clustering / topical consistency
-    k = min(clustering_k, n)
+    k = min(clustering_k, n) # cannot have more clusters than points
     km = KMeans(n_clusters=k, random_state=0, n_init=10)
     labels = km.fit_predict(embs_n)
-    cluster_inertia = float(km.inertia_)
+    cluster_inertia = float(km.inertia_) # The inertia: Sum of squared distances to closest cluster center,
+                                         # Adds a useful measure of how tight the clusters are.
     silhouette = float("nan")
     if n >= 3 and k >= 2:
-        silhouette = float(silhouette_score(embs_n, labels))
+        silhouette = float(silhouette_score(embs_n, labels)) # Silhouette is a metric that measures how similar an object is to its own cluster
+                                                            # Adds a useful measure of how well-separated the clusters are.
 
     return {
         "n_sentences": int(n),
@@ -191,10 +200,7 @@ def featurize_texts_sim(
             text, model=model, model_name=model_name, device=device, batch_size=batch_size, clustering_k=clustering_k
         )
 
-        # simple composite score (useful as a lightweight signal)
-        similarity_score = clamp01(1.0 - feats.get("centroid_cosine", 1.0)) if isinstance(feats.get("centroid_cosine"), float) else 0.0
-
-        window_rows.append({"label": label, "meta": meta, "features": feats, "similarity_score": float(similarity_score)})
+        window_rows.append({"label": label, "meta": meta, "features": feats})
 
     if not aggregate_doc:
         return window_rows
@@ -219,16 +225,11 @@ def featurize_texts_sim(
             agg[f"mean_{k}"] = float(vals.mean())
             agg[f"std_{k}"] = float(vals.std(ddof=0)) if vals.size > 1 else 0.0
 
-        # mean similarity_score
-        scores = np.array([float(r.get("similarity_score", 0.0)) for r in rows], dtype=float)
-        agg["mean_similarity_score"] = float(scores.mean()) if scores.size else 0.0
-        agg["std_similarity_score"] = float(scores.std(ddof=0)) if scores.size > 1 else 0.0
-
         doc_meta = dict(rows[0].get("meta", {}))
         doc_meta["level"] = "doc"
         doc_meta["text_id"] = tid
 
-        doc_rows.append({"label": rows[0].get("label"), "meta": doc_meta, "features": agg, "similarity_score": agg["mean_similarity_score"]})
+        doc_rows.append({"label": rows[0].get("label"), "meta": doc_meta, "features": agg})
 
     return window_rows + doc_rows
 
