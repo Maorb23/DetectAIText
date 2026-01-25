@@ -28,17 +28,22 @@ def sampling_discrepancy_analytic(
         logits_ref = logits_ref[..., :vocab_size]
         logits_score = logits_score[..., :vocab_size]
 
+    # Overall function:
+    # 
     # labels shape: (B, T, 1) for gather
     if labels.ndim == logits_score.ndim - 1:
+        print("reshaping labels for gather")
         labels = labels.unsqueeze(-1)
 
     lprobs_score = torch.log_softmax(logits_score, dim=-1)    # (B, T, V)
     probs_ref = torch.softmax(logits_ref, dim=-1)             # (B, T, V)
 
     # log-likelihood of observed labels under scoring model
-    log_likelihood = lprobs_score.gather(dim=-1, index=labels).squeeze(-1)  # (B, T)
+    log_likelihood = lprobs_score.gather(dim=-1, index=labels).squeeze(-1)  # Matches the probs to the true labels
+                                                                            # (B, T)
 
-    mean_ref = (probs_ref * lprobs_score).sum(dim=-1)  # (B, T)
+    mean_ref = (probs_ref * lprobs_score).sum(dim=-1)   # Get the mean of the scoring model under the reference model 
+                                                        # (B, T) 
     var_ref = (probs_ref * (lprobs_score ** 2)).sum(dim=-1) - (mean_ref ** 2)  # (B, T)
 
     # sum over tokens, normalize by sqrt(var sum)
@@ -143,7 +148,7 @@ class FastDetectGPTTool:
             return_tensors="pt",
             return_token_type_ids=False,
         )
-        return {k: v.to(self.device) for k, v in enc.items()}
+        return {k: v.to(self.device) for k, v in enc.items()} # Returns tensors of input_ids, attention_mask on the correct device
 
     def _encode_sampling(self, batch: List[str]) -> Dict[str, torch.Tensor]:
         enc = self.sampling_tokenizer(
@@ -154,10 +159,10 @@ class FastDetectGPTTool:
             return_tensors="pt",
             return_token_type_ids=False,
         )
-        return {k: v.to(self.device) for k, v in enc.items()}
+        return {k: v.to(self.device) for k, v in enc.items()} # Returns tensors of input_ids, attention_mask 
 
     @torch.inference_mode()
-    def featurize_texts(
+    def featurize_texts_fdg(
         self,
         texts: List[str],
         batch_size: int = 4,
@@ -203,7 +208,7 @@ class FastDetectGPTTool:
 
             disc_np = disc.detach().to("cpu").float().numpy()
 
-            # optional probability mapping
+            # optional probability mapping-- we use it for 
             prob_np: Optional[np.ndarray] = None
             if None not in (self.cfg.mu0, self.cfg.sigma0, self.cfg.mu1, self.cfg.sigma1):
                 prob_np = prob_from_two_normals(

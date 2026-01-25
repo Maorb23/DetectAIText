@@ -15,6 +15,7 @@ from scripts.modules.heuristics import compute_heuristics
 from scripts.modules.logits import LogitsFeatureExtractor
 from scripts.modules.binocular import BinocularsTool, BinocularsConfig
 from scripts.modules.fast_detect_gpt import FastDetectGPTTool, FastDetectGPTConfig 
+from scripts.modules.similarity import featurize_texts_sim
 
 
 def read_jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -66,6 +67,12 @@ def main() -> None:
     parse.add_argument("--fd_batch_size", type=int, default=4)
     parse.add_argument("--fd_use_bfloat16", action="store_true")
 
+    # Similarity / embedding coherence
+    parse.add_argument("--with_similarity", action="store_true", help="Compute semantic coherence / embedding-drift features")
+    parse.add_argument("--sim_model_name", type=str, default="all-MiniLM-L6-v2", help="Embedding model name for sentence embeddings")
+    parse.add_argument("--sim_batch_size", type=int, default=32, help="Embedding batch size")
+    parse.add_argument("--sim_clustering_k", type=int, default=2, help="K for clustering topical consistency")
+    
     # Step 3: Logits
     parse.add_argument("--with_logits", action="store_true", help="Also compute logits features (Step 3)")
     parse.add_argument("--logits_model_id", type=str, default="Qwen/Qwen3-0.6B", help="HF model id for logits")
@@ -110,6 +117,33 @@ def main() -> None:
             print(f"Saved doc heuristics: {heur_doc_out}")
 
     # -------------------------
+    # Step 1.5: Similarity / embedding coherence
+    # -------------------------
+    if args.with_similarity:
+        sim_rows = featurize_texts_sim(
+            examples,
+            model_name=args.sim_model_name,
+            device=args.device,
+            batch_size=args.sim_batch_size,
+            clustering_k=args.sim_clustering_k,
+            aggregate_doc=args.aggregate_doc,
+        )
+
+        sim_window_rows = [r for r in sim_rows if r.get("meta", {}).get("level") != "doc"]
+        sim_doc_rows = [r for r in sim_rows if r.get("meta", {}).get("level") == "doc"]
+
+        sim_windows_out = out_dir / f"{base}_similarity_windows.jsonl"
+        write_jsonl(sim_windows_out, sim_window_rows)
+        print(f"Saved window similarity: {sim_windows_out}")
+
+        if sim_doc_rows:
+            sim_doc_out = out_dir / f"{base}_similarity_doc.json"
+            doc_obj = sim_doc_rows[0] if len(sim_doc_rows) == 1 else {"docs": sim_doc_rows}
+            write_json(sim_doc_out, doc_obj)
+            print(f"Saved doc similarity: {sim_doc_out}")
+
+
+    # -------------------------
     # Step 2: Binoculars features
     # -------------------------
     if args.with_binoculars:
@@ -126,7 +160,7 @@ def main() -> None:
         )
 
         texts = [r.get("text", "") for r in examples]
-        bino_feats = tool.featurize_texts(texts)  # list of {"binoculars_features": {...}}
+        bino_feats = tool.featurize_texts_bin(texts)  # list of {"binoculars_features": {...}}
 
         bino_window_rows: List[Dict[str, Any]] = []
         for rr, feat in zip(examples, bino_feats):
@@ -166,7 +200,7 @@ def main() -> None:
             sigma1=args.fd_sigma1,
         )
         tool = FastDetectGPTTool(cfg)
-        fd_feats = tool.featurize_texts(
+        fd_feats = tool.featurize_texts_fdg(
             texts,
             batch_size=args.fd_batch_size,
             show_progress=True,
@@ -194,6 +228,7 @@ def main() -> None:
         write_json(fd_doc_out, doc_obj)
         print(f"Saved doc fastdetectgpt: {fd_doc_out}")
 
+    
     # -------------------------
     # Step 3: Logits features
     # -------------------------

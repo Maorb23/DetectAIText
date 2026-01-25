@@ -110,7 +110,7 @@ class BinocularsTool:
 
         return obs_logits, perf_logits
 
-    def featurize_texts(self,texts: List[str],batch_size: int = 8,
+    def featurize_texts_bin(self,texts: List[str],batch_size: int = 8,
                         show_progress: bool = True,
                         progress_desc: str = "Binoculars",) -> List[Dict[str, Any]]:
         """
