@@ -1,6 +1,8 @@
 python-docx>=0.8
 pypdf>=4.0
-torch>=2.1
+#torch>=2.1 pip install --no-cache-dir --timeout 300 --retries 30   "https://download.pytorch.org/whl/cpu/torch-2.9.1%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl"
 transformers>=4.39
 numpy>=1.24
 scikit-learn>=1.4
+requests>=2.31.0
+tqdm>=4.66.1

@@ -1,5 +1,5 @@
 # scripts/preprocess.py
-# Gets raw text string -> normalized, windowed text examples
+# Gets converted raw text string -> normalized, windowed text examples
 
 from __future__ import annotations
 
@@ -19,6 +19,86 @@ THREE_OR_MORE_NEWLINES = re.compile(r"\n{3,}")
 
 # A simple sentence splitter (English-ish). You can replace later if needed.
 SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'])")
+
+import re
+
+GUTENBERG_START = re.compile(r"\*\*\*\s*START OF (?:THIS|THE)?\s*PROJECT GUTENBERG EBOOK.*?\*\*\*", re.I | re.S)
+GUTENBERG_END   = re.compile(r"\*\*\*\s*END OF (?:THIS|THE)?\s*PROJECT GUTENBERG EBOOK.*?\*\*\*", re.I | re.S)
+
+TOC_HINT = re.compile(r"\b(table of contents|contents|list of (?:illustrations|tables)|illustrations)\b", re.I)
+COPYRIGHT_HINT = re.compile(r"\b(copyright|isbn|all rights reserved|printed in|publisher|edition|library of congress)\b", re.I)
+
+DOT_LEADER_LINE = re.compile(r"\.{3,}\s*\d+\s*$")
+TOC_LINE = re.compile(r"^\s*(chapter|book|part|section)\b.*\d+\s*$", re.I)
+ROMAN_ONLY = re.compile(r"^\s*[ivxlcdm]+\s*$", re.I)
+PAGE_NO = re.compile(r"^\s*\d+\s*$")
+
+def strip_gutenberg_boilerplate(text: str) -> str:
+    m = GUTENBERG_START.search(text)
+    if m:
+        text = text[m.end():]
+    m = GUTENBERG_END.search(text)
+    if m:
+        text = text[:m.start()]
+    return text.strip()
+
+def looks_like_front_matter_paragraph(p: str) -> bool:
+    s = p.strip()
+    if not s:
+        return True
+
+    if TOC_HINT.search(s) or COPYRIGHT_HINT.search(s):
+        return True
+
+    lines = [ln.strip() for ln in s.split("\n") if ln.strip()]
+    if not lines:
+        return True
+
+    if any(DOT_LEADER_LINE.search(ln) for ln in lines):
+        return True
+    if sum(1 for ln in lines if TOC_LINE.search(ln)) >= 2:
+        return True
+    if sum(1 for ln in lines if ROMAN_ONLY.match(ln) or PAGE_NO.match(ln)) >= max(2, len(lines) // 2):
+        return True
+
+    # title-page shape: many short centered-ish lines, little punctuation
+    short_lines = sum(len(ln) <= 40 for ln in lines)
+    punct = sum(ch in ".!?" for ch in s)
+    if len(lines) >= 4 and short_lines >= int(0.7 * len(lines)) and punct == 0:
+        return True
+
+    return False
+
+def looks_like_content_paragraph(p: str) -> bool:
+    s = p.strip()
+    if len(s) < 200:
+        return False
+    # require at least one sentence-ending punctuation and decent letter ratio
+    letters = sum(ch.isalpha() for ch in s)
+    if letters < 80:
+        return False
+    if sum(ch in ".!?" for ch in s) < 1:
+        return False
+    return True
+
+def trim_front_matter(text: str, max_drop: int = 80) -> str:
+    text = strip_gutenberg_boilerplate(text)
+    paras = [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
+    if len(paras) <= 5:
+        return text.strip()
+
+    drop = 0
+    for i, p in enumerate(paras[:max_drop]):
+        if looks_like_content_paragraph(p):
+            break
+        if looks_like_front_matter_paragraph(p):
+            drop = i + 1
+        else:
+            # ambiguous: keep it (don’t over-delete)
+            break
+
+    return "\n\n".join(paras[drop:]).strip()
+
 
 
 # --- Newline variants we want to normalize into '\n' ---

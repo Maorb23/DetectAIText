@@ -31,6 +31,21 @@ def load_text_from_pdf(path: str) -> str:
     pages = [(page.extract_text() or "").strip() for page in reader.pages]
     return "\n\n".join(pages)
 
+def load_text_from_jsonl(path: str) -> str:
+    """
+    Load text from a .jsonl file, concatenating all "text" fields.
+    """
+    import json
+
+    texts = []
+    with open(path, "r", encoding="utf-8", errors="replace", newline=None) as f:
+        for line in f:
+            obj = json.loads(line)
+            text = obj.get("text", "").strip()
+            if text:
+                texts.append(text)
+    return "\n\n".join(texts)
+
 
 def load_text_format(path: str) -> str:
     """
@@ -44,5 +59,7 @@ def load_text_format(path: str) -> str:
         return load_text_from_docx(path)
     if suffix == ".pdf":
         return load_text_from_pdf(path)
+    if suffix == ".jsonl":
+        return load_text_from_jsonl(path)
 
     raise ValueError(f"Unsupported file type: {suffix}")

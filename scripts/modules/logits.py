@@ -56,8 +56,8 @@ class LogitsFeatureExtractor:
             max_length=self.max_tokens,
             padding=False,
         )
-        input_ids = enc["input_ids"].to(self.device)
-        attn = enc.get("attention_mask", torch.ones_like(input_ids)).to(self.device)
+        input_ids = enc["input_ids"].to(self.device) # [1, T]?
+        attn = enc.get("attention_mask", torch.ones_like(input_ids)).to(self.device) #
 
         if input_ids.shape[1] < 3:
             return LogitsFeatures(
@@ -75,7 +75,7 @@ class LogitsFeatureExtractor:
         mask = attn[:, 1:].bool()                  # [1, T-1]
 
         log_probs = torch.log_softmax(logits, dim=-1)  # [1, T-1, V]
-        true_lp = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)  # [1, T-1]
+        true_lp = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)  # [1, T-1], gather unifies the log-probs and the true next label tokens.
         true_lp = true_lp[mask].float()  # [N]
 
         p = log_probs.exp()
@@ -127,7 +127,7 @@ def _summarize(
     return LogitsFeatures(
         mean_logprob=mean_lp,
         std_logprob=std_lp,
-        p10_logprob=q(true_lp, 0.10),
+        p10_logprob=q(true_lp, 0.10), # q for quantile
         p50_logprob=q(true_lp, 0.50),
         p90_logprob=q(true_lp, 0.90),
         mean_entropy=float(ent.mean().item()),

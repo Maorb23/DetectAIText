@@ -1,4 +1,5 @@
-# ai_detect/tools/heuristics.py
+# scrits/heuristics.py
+# Compute heuristic features for text windows/documents, gets normalized text
 from __future__ import annotations
 
 import math
@@ -42,154 +43,52 @@ class HeuristicFeatures:
     n_words: int
     n_chars: int
 
-
-def compute_heuristics(
-    examples: List[Dict[str, Any]],
-    aggregate_doc: bool = True,
-    window_separator: str = _WINDOW_SEPARATOR,
-) -> List[Dict[str, Any]]:
+def _aggregate_doc_rows(
+    text_id: str,
+    rows: List[Dict[str, Any]],
+    window_separator: str,
+) -> Dict[str, Any]:
     """
-    Compute heuristic features for prepared examples from `prepare_examples`.
+    Aggregate window-level heuristic results into a single document-level row.
 
-    Input example (prepared):
-      {"text": "...", "label": ..., "meta": {"text_id": "...", "window_index": ..., ...}}
-
-    Output (per example):
-      {
-        "label": ...,
-        "meta": {...},
-        "features": {...},
-        "heuristics_score": float in [0,1]
-      }
-
-    If aggregate_doc=True, also adds a document-level record per text_id:
-      meta["level"] = "doc"
-      meta["text_id"] = ...
-      features are mean across windows; scores averaged.
+    - Averages each feature across all windows
+    - Averages the window heuristic scores
+    - Cleans window-specific metadata
     """
-    per_window: List[Dict[str, Any]] = []
-    for ex in examples:
-        text = ex.get("text", "") or ""
-        meta = dict(ex.get("meta", {}))
-        label = ex.get("label", None)
 
-        feats = extract_features(text)
-        score = heuristics_score(feats)
+    # collect all window feature dicts
+    window_features = [row["features"] for row in rows]
 
-        per_window.append(
-            {
-                "label": label,
-                "meta": meta,
-                "features": feats.__dict__,
-                "heuristics_score": score,
-            }
-        )
+    # collect all window scores
+    window_scores = [float(row["heuristics_score"]) for row in rows]
 
-    if not aggregate_doc:
-        return per_window
+    # average each feature across windows
+    averaged_features: Dict[str, float] = {}
+    feature_names = window_features[0].keys()
 
-    by_text_id: Dict[str, List[Dict[str, Any]]] = {}
-    for row in per_window:
-        tid = str(row.get("meta", {}).get("text_id", ""))
-        by_text_id.setdefault(tid, []).append(row)
+    for name in feature_names:
+        values = [float(feats[name]) for feats in window_features]
+        averaged_features[name] = mean(values)
 
-    doc_rows: List[Dict[str, Any]] = []
-    for tid, rows in by_text_id.items():
-        if not tid:
-            continue
-        doc_rows.append(_aggregate_doc_rows(tid, rows, window_separator=window_separator))
-
-    return per_window + doc_rows
-
-
-def extract_features(text: str) -> HeuristicFeatures:
-    sentences = split_sentences(text)
-    tokens = tokenize_words(text)
-    n_chars = len(text)
-
-    distinct_3 = distinct_ngram_ratio(tokens, n=3)
-    longest_rep = longest_repeated_ngram_len(tokens, max_n=12)
-    rep_sent = repeated_sentence_ratio(sentences)
-
-    sent_lens = [len(tokenize_words(s)) for s in sentences if s.strip()]
-    sent_len_var = variance(sent_lens)
-
-    punct_entropy = punctuation_entropy(text)
-
-    stop_ratios = [stopword_ratio(s) for s in sentences if s.strip()]
-    stop_var = variance(stop_ratios)
-
-    char_tri_ent = char_trigram_entropy(text)
-    word_ent = word_entropy(tokens)
-
-    return HeuristicFeatures(
-        distinct_3gram_ratio=distinct_3,
-        longest_repeat_ngram=longest_rep,
-        repeated_sentence_ratio=rep_sent,
-        sentence_len_var=sent_len_var,
-        punctuation_entropy=punct_entropy,
-        stopword_ratio_var=stop_var,
-        char_trigram_entropy=char_tri_ent,
-        word_entropy=word_ent,
-        n_sentences=len([s for s in sentences if s.strip()]),
-        n_words=len(tokens),
-        n_chars=n_chars,
-    )
-
-
-def heuristics_score(f: HeuristicFeatures) -> float:
-    """
-    A small, stable scoring function:
-    - more repetition => higher score (more AI-like)
-    - lower variability/entropy => higher score (more AI-like)
-
-    Returns probability-like score in [0,1].
-    """
-    rep = 0.0
-    rep += clamp01((0.80 - f.distinct_3gram_ratio) / 0.30)            # low distinctness -> AI-ish
-    rep += clamp01((f.longest_repeat_ngram - 6.0) / 10.0)            # long repeats -> AI-ish
-    rep += clamp01((f.repeated_sentence_ratio - 0.02) / 0.15)        # duplicate sentences -> AI-ish
-    rep /= 3.0
-
-    burst = 0.0
-    burst += clamp01((8.0 - f.sentence_len_var) / 12.0)              # low variance -> AI-ish
-    burst += clamp01((1.6 - f.punctuation_entropy) / 1.6)            # low punct entropy -> AI-ish
-    burst += clamp01((0.020 - f.stopword_ratio_var) / 0.020)         # low stopword variance -> AI-ish
-    burst /= 3.0
-
-    ent = 0.0
-    ent += clamp01((3.5 - f.char_trigram_entropy) / 2.0)             # low char entropy -> AI-ish
-    ent += clamp01((6.5 - f.word_entropy) / 3.0)                     # low word entropy -> AI-ish
-    ent /= 2.0
-
-    # down-weight when text is short (heuristics less reliable)
-    length_gate = clamp01((f.n_words - 80) / 200.0)
-
-    raw = 0.50 * rep + 0.30 * burst + 0.20 * ent
-    raw = (0.60 * raw + 0.40 * 0.50) if length_gate < 0.25 else raw  # pull toward 0.5 if too short
-    raw = 0.50 + length_gate * (raw - 0.50)
-
-    return clamp01(raw)
-
-
-def _aggregate_doc_rows(text_id: str, rows: List[Dict[str, Any]], window_separator: str) -> Dict[str, Any]:
-    feats_list = [r["features"] for r in rows]
-    scores = [float(r["heuristics_score"]) for r in rows]
-
-    mean_feats = {k: mean([float(d[k]) for d in feats_list]) for k in feats_list[0].keys()}
+    # start from metadata of the first window
     doc_meta = dict(rows[0].get("meta", {}))
+
+    # mark this row as document-level
     doc_meta["level"] = "doc"
     doc_meta["text_id"] = text_id
+
+    # remove window-specific fields
     doc_meta.pop("window_index", None)
     doc_meta.pop("window_text_id", None)
     doc_meta.pop("window_estimated_tokens", None)
 
     return {
-        "label": rows[0].get("label", None),
+        "label": rows[0].get("label"),
         "meta": doc_meta,
-        "features": mean_feats,
-        "heuristics_score": float(mean(scores)),
+        "features": averaged_features,
+        "heuristics_score": mean(window_scores),
     }
+
 
 
 def split_sentences(text: str) -> List[str]:
@@ -324,3 +223,135 @@ def clamp01(x: float) -> float:
     if x > 1.0:
         return 1.0
     return x
+
+
+
+def extract_features(text: str) -> HeuristicFeatures:
+    sentences = split_sentences(text)
+    tokens = tokenize_words(text)
+    n_chars = len(text)
+
+    distinct_3 = distinct_ngram_ratio(tokens, n=3)
+    longest_rep = longest_repeated_ngram_len(tokens, max_n=12)
+    rep_sent = repeated_sentence_ratio(sentences)
+
+    sent_lens = [len(tokenize_words(s)) for s in sentences if s.strip()]
+    sent_len_var = variance(sent_lens)
+
+    punct_entropy = punctuation_entropy(text)
+
+    stop_ratios = [stopword_ratio(s) for s in sentences if s.strip()]
+    stop_var = variance(stop_ratios)
+
+    char_tri_ent = char_trigram_entropy(text)
+    word_ent = word_entropy(tokens)
+
+    return HeuristicFeatures(
+        distinct_3gram_ratio=distinct_3,
+        longest_repeat_ngram=longest_rep,
+        repeated_sentence_ratio=rep_sent,
+        sentence_len_var=sent_len_var,
+        punctuation_entropy=punct_entropy,
+        stopword_ratio_var=stop_var,
+        char_trigram_entropy=char_tri_ent,
+        word_entropy=word_ent,
+        n_sentences=len([s for s in sentences if s.strip()]),
+        n_words=len(tokens),
+        n_chars=n_chars,
+    )
+
+
+def heuristics_score(f: HeuristicFeatures) -> float:
+    """
+    A small, stable scoring function:
+    - more repetition => higher score (more AI-like)
+    - lower variability/entropy => higher score (more AI-like)
+
+    Returns probability-like score in [0,1].
+    """
+    rep = 0.0
+    rep += clamp01((0.80 - f.distinct_3gram_ratio) / 0.30)            # low distinctness -> AI-ish
+    rep += clamp01((f.longest_repeat_ngram - 6.0) / 10.0)            # long repeats -> AI-ish
+    rep += clamp01((f.repeated_sentence_ratio - 0.02) / 0.15)        # duplicate sentences -> AI-ish
+    rep /= 3.0
+
+    burst = 0.0
+    burst += clamp01((8.0 - f.sentence_len_var) / 12.0)              # low variance -> AI-ish
+    burst += clamp01((1.6 - f.punctuation_entropy) / 1.6)            # low punct entropy -> AI-ish
+    burst += clamp01((0.020 - f.stopword_ratio_var) / 0.020)         # low stopword variance -> AI-ish
+    burst /= 3.0
+
+    ent = 0.0
+    ent += clamp01((3.5 - f.char_trigram_entropy) / 2.0)             # low char entropy -> AI-ish
+    ent += clamp01((6.5 - f.word_entropy) / 3.0)                     # low word entropy -> AI-ish
+    ent /= 2.0
+
+    # down-weight when text is short (heuristics less reliable)
+    length_gate = clamp01((f.n_words - 80) / 200.0)
+
+    raw = 0.50 * rep + 0.30 * burst + 0.20 * ent
+    raw = (0.60 * raw + 0.40 * 0.50) if length_gate < 0.25 else raw  # pull toward 0.5 if too short
+    raw = 0.50 + length_gate * (raw - 0.50)
+
+    return clamp01(raw)
+
+
+
+def compute_heuristics(
+    examples: List[Dict[str, Any]],
+    aggregate_doc: bool = True,
+    window_separator: str = _WINDOW_SEPARATOR,
+) -> List[Dict[str, Any]]:
+    """
+    Compute heuristic features for prepared examples from `prepare_examples`.
+
+    Input example (prepared):
+      {"text": "...", "label": ..., "meta": {"text_id": "...", "window_index": ..., ...}}
+
+    Output (per example):
+      {
+        "label": ...,
+        "meta": {...},
+        "features": {...},
+        "heuristics_score": float in [0,1]
+      }
+
+    If aggregate_doc=True, also adds a document-level record per text_id:
+      meta["level"] = "doc"
+      meta["text_id"] = ...
+      features are mean across windows; scores averaged.
+    """
+    per_window: List[Dict[str, Any]] = []
+    for ex in examples:
+        text = ex.get("text", "") or ""
+        meta = dict(ex.get("meta", {}))
+        label = ex.get("label", None)
+
+        feats = extract_features(text)
+        score = heuristics_score(feats)
+
+        per_window.append(
+            {
+                "label": label,
+                "meta": meta,
+                "features": feats.__dict__,
+                "heuristics_score": score,
+            }
+        )
+
+    if not aggregate_doc:
+        print("Skipping document-level aggregation of heuristic scores.")
+        return per_window
+
+    by_text_id: Dict[str, List[Dict[str, Any]]] = {}
+    for row in per_window:
+        tid = str(row.get("meta", {}).get("text_id", ""))
+        by_text_id.setdefault(tid, []).append(row)
+
+    doc_rows: List[Dict[str, Any]] = []
+    for tid, rows in by_text_id.items():
+        if not tid:
+            continue
+        doc_rows.append(_aggregate_doc_rows(tid, rows, window_separator=window_separator))
+
+    return per_window + doc_rows # returns 
