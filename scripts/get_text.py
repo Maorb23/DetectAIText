@@ -47,7 +47,7 @@ def main() -> None:
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
     if input_path.suffix.lower() == ".jsonl":
-        raw_text = load_jsonl_examples(input_path)
+        examples = load_jsonl_examples(input_path)
     else:
         raw_text = load_text_format(str(input_path))
         examples = [{"text": raw_text, "label": 0, "meta": {}}]
