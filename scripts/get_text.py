@@ -59,7 +59,6 @@ def main() -> None:
 
     print(f"Saved: {output_path}")
     if args.prepare_examples:
-        examples = [{"text": raw_text, "label": 0, "meta": {}}] 
         prepared = prepare_examples(
             examples,
             max_estimated_tokens=args.max_estimated_tokens,
