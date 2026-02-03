@@ -4,7 +4,7 @@
 from __future__ import annotations
 from pathlib import Path
 from pypdf import PdfReader
-
+import json
 
 def load_text_from_txt(path: str, encoding: str = "utf-8") -> str:
     with open(path, "r", encoding=encoding, errors="replace", newline=None) as f:
