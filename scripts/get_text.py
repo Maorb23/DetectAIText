@@ -57,7 +57,6 @@ def main() -> None:
     else:
         output_path = Path(args.output_path)
 
-    write_text(output_path, examples)
     print(f"Saved: {output_path}")
     if args.prepare_examples:
         examples = [{"text": raw_text, "label": 0, "meta": {}}] 
