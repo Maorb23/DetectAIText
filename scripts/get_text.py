@@ -11,7 +11,7 @@ from pypdf import PdfReader
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.data_files.convert import load_text_format
+from scripts.data_files.convert import load_text_format, load_jsonl_examples
 from scripts.data_files.preprocess import normalize_text, split_text_into_windows, prepare_examples
 import logging
 import json
@@ -46,7 +46,12 @@ def main() -> None:
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    raw_text = load_text_format(str(input_path))
+    if input_path.suffix.lower() == ".jsonl":
+        examples = load_jsonl_examples(input_path)
+    else:
+        raw_text = load_text_format(str(input_path))
+        examples = [{"text": raw_text, "label": 0, "meta": {}}]
+
     normalized_text = normalize_text(raw_text)
 
     if args.max_estimated_tokens is not None:

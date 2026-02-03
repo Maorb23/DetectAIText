@@ -47,6 +47,25 @@ def load_text_from_jsonl(path: str) -> str:
     return "\n\n".join(texts)
 
 
+def load_jsonl_examples(path: Path) -> list[dict]:
+    rows = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            # accept either your dataset format or generic
+            if "text" in obj:
+                rows.append({
+                    "text": obj["text"],
+                    "label": obj.get("label", 0),
+                    "meta": obj.get("meta", {}),
+                })
+    return rows
+
+
+
 def load_text_format(path: str) -> str:
     """
     Load .txt, .docx, or .pdf into a raw text string.
