@@ -47,24 +47,10 @@ def main() -> None:
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
     if input_path.suffix.lower() == ".jsonl":
-        examples = load_jsonl_examples(input_path)
+        raw_text = load_jsonl_examples(input_path)
     else:
         raw_text = load_text_format(str(input_path))
         examples = [{"text": raw_text, "label": 0, "meta": {}}]
-
-    normalized_text = normalize_text(raw_text)
-
-    if args.max_estimated_tokens is not None:
-        windows = split_text_into_windows(
-            normalized_text,
-            max_estimated_tokens=args.max_estimated_tokens,
-            overlap_estimated_tokens=args.overlap_estimated_tokens,
-        )
-        normalized_text = args.window_separator.join(windows)
-
-    if args.print:
-        print(normalized_text)
-        return
 
     if args.output_path is None:
         output_path = input_path.with_suffix(".txt")
